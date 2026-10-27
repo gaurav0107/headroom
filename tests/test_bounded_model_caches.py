@@ -21,6 +21,7 @@ import pytest
 
 from headroom.pricing import litellm_pricing as lp
 from headroom.telemetry import session
+from headroom.tokenizers.estimator import EstimatingTokenCounter
 from headroom.tokenizers.registry import TokenizerRegistry
 from headroom.utils import remember_bounded
 
@@ -55,6 +56,19 @@ def test_remember_bounded_nonpositive_maxsize_stores_nothing():
     assert cache == {}
 
 
+def test_remember_bounded_tolerates_a_dict_resized_by_another_thread():
+    class ResizedDuringIteration(dict):
+        def __iter__(self):
+            raise RuntimeError("dictionary changed size during iteration")
+
+    cache = ResizedDuringIteration({"k0": 0, "k1": 1})
+    remember_bounded(cache, "k2", 2, maxsize=2)
+
+    # The eviction is skipped for this call rather than raising on the request
+    # path; the next insert that can iterate trims the cache again.
+    assert dict.__getitem__(cache, "k2") == 2
+
+
 # --------------------------------------------------------------------------
 # TokenizerRegistry._cache
 # --------------------------------------------------------------------------
@@ -71,6 +85,15 @@ def test_tokenizer_registry_cache_is_bounded(clean_tokenizer_cache):
     cap = TokenizerRegistry._CACHE_MAXSIZE
     for i in range(cap + 50):
         TokenizerRegistry.get(f"client-model-{i}-" + "m" * 1_000)
+
+    assert len(TokenizerRegistry._cache) == cap
+
+
+def test_tokenizer_registry_estimation_fallback_is_bounded(clean_tokenizer_cache):
+    cap = TokenizerRegistry._CACHE_MAXSIZE
+    for i in range(cap + 10):
+        tokenizer = TokenizerRegistry.get(f"client-model-{i}", backend="no-such-backend")
+        assert isinstance(tokenizer, EstimatingTokenCounter)
 
     assert len(TokenizerRegistry._cache) == cap
 
