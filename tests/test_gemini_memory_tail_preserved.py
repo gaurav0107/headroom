@@ -226,3 +226,44 @@ def test_carry_skips_when_target_entry_is_not_preserved() -> None:
         contents, set(), preserved, before, after
     )
     assert preserved == {}
+
+
+_IMAGE_ENTRY = {
+    "role": "user",
+    "parts": [{"inlineData": {"mimeType": "image/png", "data": "AA=="}}, {"text": "a"}],
+}
+_BEFORE = [{"role": "user", "content": "a"}]
+_SYSTEM = {"role": "system", "content": "s"}
+
+
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param(_BEFORE, [*_BEFORE, {"role": "user", "content": "b"}], id="length-changed"),
+        pytest.param(_BEFORE, list(_BEFORE), id="nothing-changed"),
+        pytest.param(
+            _BEFORE,
+            [{"role": "user", "content": [{"type": "text", "text": "a\n\nmem"}]}],
+            id="non-string-content",
+        ),
+        pytest.param(_BEFORE, [{"role": "user", "content": "rewritten"}], id="not-an-append"),
+        pytest.param(
+            [_SYSTEM, {"role": "user", "content": "x"}],
+            [_SYSTEM, {"role": "user", "content": "x\n\nmem"}],
+            id="no-matching-entry",
+        ),
+    ],
+)
+def test_carry_leaves_preserved_entry_alone_for_unrecognized_shapes(
+    before: list[dict], after: list[dict]
+) -> None:
+    """Anything other than one string message gaining a suffix is not a tail
+    append this helper understands: keep today's behavior untouched."""
+    # "no-matching-entry" maps to a second text entry that does not exist.
+    contents = [_IMAGE_ENTRY] if len(before) == 1 else [{"role": "user", "parts": []}]
+    preserved = {0: _IMAGE_ENTRY}
+
+    assert GeminiHandlerMixin._carry_tail_append_into_preserved(
+        contents, {0}, preserved, before, after
+    )
+    assert preserved == {0: _IMAGE_ENTRY}
